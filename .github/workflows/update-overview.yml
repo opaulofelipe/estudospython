@@ -1,5 +1,6 @@
 name: Atualizar visão geral
 
+# Executa uma única atualização da aba de visão geral.
 on:
   push:
     branches: [main]
