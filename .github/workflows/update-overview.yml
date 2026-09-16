@@ -1,0 +1,128 @@
+name: Atualizar visão geral
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/update-overview.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  update-overview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Atualizar app.py
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('app.py')
+          text = path.read_text(encoding='utf-8')
+
+          start = text.index('with tab_overview:')
+          footer = text.index('st.markdown(\n    \'<div class="small-note"', start)
+
+          new_section = '''with tab_overview:
+              st.write("")
+
+              # Um gráfico de rosca por disciplina.
+              # O ângulo dourado gera uma cor pastel exclusiva para cada matéria,
+              # sem repetir tons dentro da lista atual de disciplinas.
+              overview_subjects = studies.to_dict("records")
+              chart_columns = 3
+
+              for start_idx in range(0, len(overview_subjects), chart_columns):
+                  cols = st.columns(chart_columns, gap="large")
+                  batch = overview_subjects[start_idx : start_idx + chart_columns]
+
+                  for offset, row in enumerate(batch):
+                      subject_index = start_idx + offset
+                      stats = row_stats(row)
+                      total = int(row["Aulas totais"])
+
+                      # Distribuição de matizes pelo ângulo dourado: visualmente distinta
+                      # mesmo quando novas disciplinas são acrescentadas à planilha.
+                      hue = (subject_index * 137.508 + 215) % 360
+                      subject_color = f"hsl({hue:.2f}, 58%, 76%)"
+
+                      with cols[offset]:
+                          fig = go.Figure(
+                              data=[
+                                  go.Pie(
+                                      labels=["Concluídas", "Restantes"],
+                                      values=[stats["count"], stats["remaining"]],
+                                      hole=0.72,
+                                      sort=False,
+                                      direction="clockwise",
+                                      marker=dict(
+                                          colors=[subject_color, "rgba(140,147,168,0.18)"],
+                                          line=dict(width=0),
+                                      ),
+                                      textinfo="none",
+                                      hovertemplate="%{label}: %{value} aula(s)<extra></extra>",
+                                  )
+                              ]
+                          )
+
+                          fig.add_annotation(
+                              text=(
+                                  f"<b>{stats['pct']:.0f}%</b>"
+                                  f"<br><span style='font-size:12px;color:{PALETTE['soft']}'>"
+                                  f"{stats['count']}/{total} aulas</span>"
+                              ),
+                              x=0.5,
+                              y=0.5,
+                              showarrow=False,
+                              font=dict(color=PALETTE["text"], size=24),
+                              align="center",
+                          )
+
+                          fig.update_layout(
+                              title=dict(
+                                  text=f"<b>{row['Disciplina']}</b>",
+                                  x=0.5,
+                                  xanchor="center",
+                                  y=0.97,
+                                  font=dict(color=PALETTE["text"], size=16),
+                              ),
+                              height=300,
+                              margin=dict(l=8, r=8, t=55, b=8),
+                              paper_bgcolor="rgba(0,0,0,0)",
+                              plot_bgcolor="rgba(0,0,0,0)",
+                              showlegend=False,
+                              font=dict(color=PALETTE["soft"]),
+                          )
+
+                          st.plotly_chart(
+                              fig,
+                              use_container_width=True,
+                              config={"displayModeBar": False},
+                              key=f"overview_donut_{row['key']}",
+                          )
+
+          '''
+
+          path.write_text(text[:start] + new_section + text[footer:], encoding='utf-8')
+          PY
+
+      - name: Validar sintaxe
+        run: python -m py_compile app.py
+
+      - name: Commit da alteração
+        shell: bash
+        run: |
+          if git diff --quiet -- app.py; then
+            echo "Nenhuma alteração necessária."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Reformula visão geral com gráficos de rosca"
+          git push
