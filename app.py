@@ -737,146 +737,80 @@ with tab_progress:
 with tab_overview:
     st.write("")
 
-    # Dados agregados por disciplina
-    overview_rows = []
-    for row in studies.to_dict("records"):
-        stats = row_stats(row)
-        overview_rows.append(
-            {
-                "Disciplina": row["Disciplina"],
-                "Instituição": row["Instituição"],
-                "Dia": row["Dia"],
-                "Concluídas": stats["count"],
-                "Total": int(row["Aulas totais"]),
-                "Restantes": stats["remaining"],
-                "Progresso": stats["pct"],
-                "Próxima": "Concluída" if stats["next"] is None else f"Aula {stats['next']}",
-            }
-        )
-    ov = pd.DataFrame(overview_rows).sort_values(["Progresso", "Disciplina"], ascending=[False, True])
+    # Um gráfico de rosca por disciplina.
+    # O ângulo dourado gera uma cor pastel exclusiva para cada matéria,
+    # sem repetir tons dentro da lista atual de disciplinas.
+    overview_subjects = studies.to_dict("records")
+    chart_columns = 3
 
-    c_chart, c_list = st.columns([1.05, 1.65], gap="large")
+    for start_idx in range(0, len(overview_subjects), chart_columns):
+        cols = st.columns(chart_columns, gap="large")
+        batch = overview_subjects[start_idx : start_idx + chart_columns]
 
-    with c_chart:
-        st.markdown('<div class="section-title">Progresso geral</div>', unsafe_allow_html=True)
-        fig = go.Figure(
-            data=[
-                go.Pie(
-                    labels=["Concluídas", "Restantes"],
-                    values=[overall["done"], overall["remaining"]],
-                    hole=0.72,
-                    marker=dict(colors=[PALETTE["muted"], PALETTE["plum"]], line=dict(width=0)),
-                    textinfo="none",
-                    hovertemplate="%{label}: %{value} aulas<extra></extra>",
+        for offset, row in enumerate(batch):
+            subject_index = start_idx + offset
+            stats = row_stats(row)
+            total = int(row["Aulas totais"])
+
+            # Distribuição de matizes pelo ângulo dourado: visualmente distinta
+            # mesmo quando novas disciplinas são acrescentadas à planilha.
+            hue = (subject_index * 137.508 + 215) % 360
+            subject_color = f"hsl({hue:.2f}, 58%, 76%)"
+
+            with cols[offset]:
+                fig = go.Figure(
+                    data=[
+                        go.Pie(
+                            labels=["Concluídas", "Restantes"],
+                            values=[stats["count"], stats["remaining"]],
+                            hole=0.72,
+                            sort=False,
+                            direction="clockwise",
+                            marker=dict(
+                                colors=[subject_color, "rgba(140,147,168,0.18)"],
+                                line=dict(width=0),
+                            ),
+                            textinfo="none",
+                            hovertemplate="%{label}: %{value} aula(s)<extra></extra>",
+                        )
+                    ]
                 )
-            ]
-        )
-        fig.add_annotation(
-            text=f"<b>{overall['pct']:.0f}%</b><br><span style='font-size:12px'>concluído</span>",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(color=PALETTE["text"], size=22),
-        )
-        fig.update_layout(
-            height=330,
-            margin=dict(l=8, r=8, t=15, b=15),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color=PALETTE["soft"]),
-            legend=dict(orientation="h", y=-0.06, x=0.5, xanchor="center"),
-        )
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-    with c_list:
-        st.markdown('<div class="section-title">Avanço por disciplina</div>', unsafe_allow_html=True)
-        chart_df = ov.sort_values("Progresso", ascending=True)
-        bar = go.Figure(
-            go.Bar(
-                x=chart_df["Progresso"],
-                y=chart_df["Disciplina"],
-                orientation="h",
-                marker_color=PALETTE["muted"],
-                text=[f"{v:.0f}%" for v in chart_df["Progresso"]],
-                textposition="outside",
-                hovertemplate="%{y}: %{x:.0f}%<extra></extra>",
-            )
-        )
-        bar.update_layout(
-            height=max(390, 28 * len(chart_df)),
-            margin=dict(l=8, r=45, t=12, b=20),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color=PALETTE["soft"]),
-            xaxis=dict(range=[0, 108], ticksuffix="%", gridcolor="rgba(140,147,168,.12)", zeroline=False),
-            yaxis=dict(gridcolor="rgba(0,0,0,0)"),
-        )
-        st.plotly_chart(bar, use_container_width=True, config={"displayModeBar": False})
+                fig.add_annotation(
+                    text=(
+                        f"<b>{stats['pct']:.0f}%</b>"
+                        f"<br><span style='font-size:12px;color:{PALETTE['soft']}'>"
+                        f"{stats['count']}/{total} aulas</span>"
+                    ),
+                    x=0.5,
+                    y=0.5,
+                    showarrow=False,
+                    font=dict(color=PALETTE["text"], size=24),
+                    align="center",
+                )
 
-    st.write("")
-    f1, f2 = st.columns([1.1, 2.2], gap="large")
-    with f1:
-        st.markdown('<div class="section-title">Ritmo semanal</div>', unsafe_allow_html=True)
-        weekly = studies.groupby("Dia").size().reindex(DIAS_ORDEM, fill_value=0)
-        week_fig = go.Figure(
-            go.Bar(
-                x=weekly.index,
-                y=weekly.values,
-                marker_color=PALETTE["purple"],
-                hovertemplate="%{x}: %{y} disciplina(s)<extra></extra>",
-            )
-        )
-        week_fig.update_layout(
-            height=315,
-            margin=dict(l=5, r=5, t=10, b=25),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color=PALETTE["soft"]),
-            xaxis=dict(tickangle=-35, gridcolor="rgba(0,0,0,0)"),
-            yaxis=dict(dtick=1, gridcolor="rgba(140,147,168,.12)", zeroline=False),
-        )
-        st.plotly_chart(week_fig, use_container_width=True, config={"displayModeBar": False})
+                fig.update_layout(
+                    title=dict(
+                        text=f"<b>{row['Disciplina']}</b>",
+                        x=0.5,
+                        xanchor="center",
+                        y=0.97,
+                        font=dict(color=PALETTE["text"], size=16),
+                    ),
+                    height=300,
+                    margin=dict(l=8, r=8, t=55, b=8),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    showlegend=False,
+                    font=dict(color=PALETTE["soft"]),
+                )
 
-    with f2:
-        st.markdown('<div class="section-title">Próximas aulas</div>', unsafe_allow_html=True)
-        display = ov[["Disciplina", "Dia", "Próxima", "Concluídas", "Total"]].copy()
-        display["Progresso"] = [f"{r['Concluídas']}/{r['Total']}" for _, r in display.iterrows()]
-        display = display[["Disciplina", "Dia", "Próxima", "Progresso"]]
-        st.dataframe(
-            display,
-            hide_index=True,
-            use_container_width=True,
-            height=315,
-            column_config={
-                "Disciplina": st.column_config.TextColumn("Disciplina", width="large"),
-                "Dia": st.column_config.TextColumn("Dia", width="small"),
-                "Próxima": st.column_config.TextColumn("Próxima aula", width="small"),
-                "Progresso": st.column_config.TextColumn("Progresso", width="small"),
-            },
-        )
-
-    with st.expander("Dados e segurança do progresso"):
-        st.markdown(
-            "O progresso é salvo separadamente da planilha. Ao sincronizar, disciplinas novas entram com progresso zero, "
-            "disciplinas existentes mantêm suas aulas concluídas e disciplinas removidas deixam de aparecer sem apagar o histórico salvo."
-        )
-        if st.button("Concluir plano inteiro", use_container_width=False):
-            complete_everything_dialog()
-        backup = json.dumps(st.session_state.store, ensure_ascii=False, indent=2)
-        st.download_button(
-            "Baixar backup do progresso",
-            data=backup,
-            file_name=f"progresso-estudos-{now.strftime('%Y-%m-%d')}.json",
-            mime="application/json",
-            use_container_width=False,
-        )
-        last_sync = st.session_state.store.get("last_sync")
-        if last_sync:
-            try:
-                stamp = datetime.fromisoformat(last_sync).astimezone(TIMEZONE).strftime("%d/%m/%Y às %H:%M")
-                st.caption(f"Última sincronização registrada: {stamp}.")
-            except Exception:
-                pass
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                    config={"displayModeBar": False},
+                    key=f"overview_donut_{row['key']}",
+                )
 
 st.markdown(
     '<div class="small-note" style="margin-top:2rem">Fonte de dados: Estudos.xlsx · O progresso fica em data/progresso.json.</div>',
